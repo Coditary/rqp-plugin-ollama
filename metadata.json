@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "name": "ollama",
+  "version": "0.1.0",
+  "summary": "ReqPack wrapper for Ollama app and models",
+  "description": "ReqPack Lua wrapper plugin for Ollama runtime installation plus local model pull, removal, query, and AICache adoption",
+  "license": "MIT"
+}

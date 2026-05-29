@@ -983,6 +983,24 @@ local function package_version(package)
     return trim(read_field(package, "version"))
 end
 
+local function package_has_model_tag(name)
+    local text = trim(name)
+    return (text:find("@", 1, true) ~= nil and text:find("@[^/@]+$") ~= nil)
+        or (text:find(":", 1, true) ~= nil and text:find(":[^/]+$") ~= nil)
+end
+
+local function requested_model_name(package)
+    local name = package_name(package)
+    local version = package_version(package)
+    if is_app_package_name(name) then
+        return name
+    end
+    if version ~= "" and not package_has_model_tag(name) then
+        return name .. "@" .. version
+    end
+    return name
+end
+
 local function normalize_token(value)
     return tostring(value or ""):gsub("/", "__"):gsub("[^%w%._%-]+", "_")
 end
@@ -2331,6 +2349,28 @@ local function build_removed_model_item(spec)
     }
 end
 
+local function build_requested_model_item(spec)
+    return {
+        name = spec.displayName,
+        packageId = spec.displayName,
+        version = spec.tag,
+        latestVersion = spec.tag,
+        summary = "Ollama model",
+        description = "Ollama model",
+        homepage = model_homepage_url(spec),
+        sourceUrl = model_homepage_url(spec),
+        packageType = "model",
+        type = "package",
+        extraFields = {
+            host = spec.host,
+            namespace = spec.namespace,
+            model = spec.model,
+            tag = spec.tag,
+            cliName = spec.cliName,
+        },
+    }
+end
+
 function plugin.getName()
     return PLUGIN_NAME
 end
@@ -2359,7 +2399,7 @@ function plugin.getMissingPackages(packages)
 
     local missing = {}
     for _, package in ipairs(packages or {}) do
-        local name = package_name(package)
+        local name = is_app_package_name(package_name(package)) and package_name(package) or requested_model_name(package)
         local action = lower(read_field(package, "action") or "")
         local exists = lookup[name] == true
         if action == "remove" or action == "update" then
@@ -2399,7 +2439,7 @@ function plugin.install(context, packages)
         end
 
         for _, package in ipairs(model_packages) do
-            local spec, spec_error = parse_model_name(package_name(package))
+            local spec, spec_error = parse_model_name(requested_model_name(package))
             if spec == nil then
                 tx_failed(context, spec_error)
                 return false
@@ -2413,18 +2453,22 @@ function plugin.install(context, packages)
             end
 
             local record, record_error = find_local_record(context, spec)
-            if record == nil then
-                tx_failed(context, first_nonempty(record_error, "ollama model manifest unavailable after pull"))
-                return false
+            local item = nil
+            if record ~= nil then
+                item = build_model_info_from_record(record, spec.tag)
+                local aicache, aicache_error = sync_aicache_for_record(context, record)
+                if aicache == nil then
+                    tx_failed(context, first_nonempty(aicache_error, "ollama aicache adoption failed"))
+                    return false
+                end
+                annotate_aicache_fields(item, aicache)
+            else
+                log_message(context, "warn", first_nonempty(record_error, "ollama model manifest unavailable after pull"))
+                item = info_from_show_cli(context, cli_binary, spec)
+                if item == nil then
+                    item = build_requested_model_item(spec)
+                end
             end
-
-            local item = build_model_info_from_record(record, spec.tag)
-            local aicache, aicache_error = sync_aicache_for_record(context, record)
-            if aicache == nil then
-                tx_failed(context, first_nonempty(aicache_error, "ollama aicache adoption failed"))
-                return false
-            end
-            annotate_aicache_fields(item, aicache)
             installed[#installed + 1] = item
         end
     end
@@ -2461,7 +2505,7 @@ function plugin.remove(context, packages)
         end
 
         for _, package in ipairs(model_packages) do
-            local spec, spec_error = parse_model_name(package_name(package))
+            local spec, spec_error = parse_model_name(requested_model_name(package))
             if spec == nil then
                 tx_failed(context, spec_error)
                 return false
@@ -2528,7 +2572,7 @@ function plugin.update(context, packages)
         end
 
         for _, package in ipairs(model_packages) do
-            local spec, spec_error = parse_model_name(package_name(package))
+            local spec, spec_error = parse_model_name(requested_model_name(package))
             if spec == nil then
                 tx_failed(context, spec_error)
                 return false
@@ -2542,18 +2586,22 @@ function plugin.update(context, packages)
             end
 
             local record, record_error = find_local_record(context, spec)
-            if record == nil then
-                tx_failed(context, first_nonempty(record_error, "ollama model manifest unavailable after update"))
-                return false
+            local item = nil
+            if record ~= nil then
+                item = build_model_info_from_record(record, spec.tag)
+                local aicache, aicache_error = sync_aicache_for_record(context, record)
+                if aicache == nil then
+                    tx_failed(context, first_nonempty(aicache_error, "ollama aicache adoption failed"))
+                    return false
+                end
+                annotate_aicache_fields(item, aicache)
+            else
+                log_message(context, "warn", first_nonempty(record_error, "ollama model manifest unavailable after update"))
+                item = info_from_show_cli(context, cli_binary, spec)
+                if item == nil then
+                    item = build_requested_model_item(spec)
+                end
             end
-
-            local item = build_model_info_from_record(record, spec.tag)
-            local aicache, aicache_error = sync_aicache_for_record(context, record)
-            if aicache == nil then
-                tx_failed(context, first_nonempty(aicache_error, "ollama aicache adoption failed"))
-                return false
-            end
-            annotate_aicache_fields(item, aicache)
             updated[#updated + 1] = item
         end
     end

@@ -7,6 +7,9 @@ local APP_PACKAGE_NAME = "app:ollama"
 local DEFAULT_HOST = "registry.ollama.ai"
 local DEFAULT_NAMESPACE = "library"
 local DEFAULT_TAG = "latest"
+local OLLAMA_WEB_BASE = "https://ollama.com"
+local OLLAMA_SEARCH_URL = OLLAMA_WEB_BASE .. "/search"
+local OLLAMA_LIBRARY_PREFIX = OLLAMA_WEB_BASE .. "/library/"
 local JSON_NULL = {}
 local cached_json_decoder = nil
 
@@ -1083,6 +1086,222 @@ local function model_homepage_url(spec)
     end
     local base = spec.namespace ~= DEFAULT_NAMESPACE and (spec.namespace .. "/" .. spec.model) or spec.model
     return "https://ollama.com/library/" .. base .. ":" .. spec.tag
+end
+
+local function html_unescape(value)
+    local text = tostring(value or "")
+    text = text:gsub("&quot;", '"')
+    text = text:gsub("&#39;", "'")
+    text = text:gsub("&apos;", "'")
+    text = text:gsub("&lt;", "<")
+    text = text:gsub("&gt;", ">")
+    text = text:gsub("&amp;", "&")
+    text = text:gsub("&#(%d+);", function(code)
+        local number = tonumber(code)
+        if number == nil or number < 0 or number > 255 then
+            return ""
+        end
+        return string.char(number)
+    end)
+    return text
+end
+
+local function strip_html_tags(value)
+    local text = tostring(value or "")
+    text = text:gsub("<br%s*/?>", "\n")
+    text = text:gsub("<[^>]+>", " ")
+    text = html_unescape(text)
+    text = text:gsub("%s+", " ")
+    return trim(text)
+end
+
+local function url_encode(value)
+    return tostring(value or ""):gsub("([^%w%-_%.~])", function(char)
+        return string.format("%%%02X", string.byte(char))
+    end)
+end
+
+local function web_get(context, url)
+    local result = run_command(context, "curl -fsSL " .. shell_quote(url))
+    if result == nil or not is_command_success(result) then
+        return nil, first_nonempty(result and result.stderr, result and result.stdout, "request failed")
+    end
+    return tostring(result.stdout or ""), nil
+end
+
+local function normalize_capability_label(value)
+    local text = lower(strip_html_tags(value))
+    if text == "" then
+        return nil
+    end
+    return text:gsub("%s+", "-")
+end
+
+local function parse_search_cards(html)
+    local items = {}
+    for href, body in tostring(html or ""):gmatch('<a href="([^"]+)" class="group w%-full">(.-)</a>%s*</li>') do
+        if starts_with(href, "/library/") then
+            local family = trim(href:match("^/library/(.+)$") or "")
+            local name = strip_html_tags(body:match('x%-test%-search%-response%-title>(.-)</span>'))
+            if family ~= "" and name ~= "" then
+                local description = strip_html_tags(body:match('<p class="max%-w%-lg break%-words text%-neutral%-800 text%-md">(.-)</p>'))
+                local capabilities = {}
+                for label in body:gmatch('x%-test%-capability[^>]*>(.-)</span>') do
+                    local capability = normalize_capability_label(label)
+                    if capability ~= nil then
+                        capabilities[#capabilities + 1] = capability
+                    end
+                end
+                local sizes = {}
+                for label in body:gmatch('x%-test%-size[^>]*>(.-)</span>') do
+                    local size = lower(strip_html_tags(label))
+                    if size ~= "" then
+                        sizes[#sizes + 1] = size
+                    end
+                end
+                items[#items + 1] = {
+                    family = family,
+                    name = name,
+                    description = description,
+                    capabilities = capabilities,
+                    sizes = sizes,
+                    pulls = strip_html_tags(body:match('x%-test%-pull%-count>(.-)</span>')),
+                    tagCount = strip_html_tags(body:match('x%-test%-tag%-count>(.-)</span>')),
+                    updated = strip_html_tags(body:match('x%-test%-updated>(.-)</span>')),
+                    libraryUrl = OLLAMA_WEB_BASE .. href,
+                    cloud = body:find('>cloud</span>', 1, true) ~= nil,
+                }
+            end
+        end
+    end
+    return items
+end
+
+local function parse_model_page_tags(html)
+    local tags = {}
+    local pattern = '<a href="/library/([^"]+)" class="block group%-hover:underline text%-sm font%-medium text%-neutral%-800">(.-)</a>(.-)<p x%-test%-model%-tag%-size[^>]*>(.-)</p>%s*<p class="col%-span%-2 text%-neutral%-500">(.-)</p>%s*<p class="col%-span%-2 text%-neutral%-500">%s*(.-)%s*</p>'
+    for tag_name, _, between, size, context_length, input_types in tostring(html or ""):gmatch(pattern) do
+        local spec = parse_model_name(strip_html_tags(tag_name))
+        if spec ~= nil then
+            tags[#tags + 1] = {
+                spec = spec,
+                size = strip_html_tags(size),
+                contextLength = strip_html_tags(context_length),
+                inputTypes = strip_html_tags(input_types),
+                isLatest = tostring(between or ""):find('>latest<', 1, true) ~= nil,
+            }
+        end
+    end
+    return tags
+end
+
+local function build_search_item_from_tag(card, tag)
+    local summary = first_nonempty(card.description, "Ollama model")
+    return {
+        name = tag.spec.displayName,
+        packageId = tag.spec.displayName,
+        version = tag.spec.tag,
+        latestVersion = tag.spec.tag,
+        summary = summary,
+        description = summary,
+        homepage = model_homepage_url(tag.spec),
+        sourceUrl = model_homepage_url(tag.spec),
+        packageType = "model",
+        type = "package",
+        updatedAt = card.updated ~= "" and card.updated or nil,
+        extraFields = {
+            host = tag.spec.host,
+            namespace = tag.spec.namespace,
+            model = tag.spec.model,
+            tag = tag.spec.tag,
+            cliName = tag.spec.cliName,
+            libraryUrl = card.libraryUrl,
+            familyName = card.name,
+            pulls = card.pulls,
+            tagCount = card.tagCount,
+            capabilities = card.capabilities,
+            labels = card.sizes,
+            contextLength = tag.contextLength,
+            inputTypes = tag.inputTypes,
+            size = tag.size,
+            isLatest = tag.isLatest,
+            cloud = card.cloud,
+        },
+    }
+end
+
+local function build_search_fallback_item(card)
+    local spec = parse_model_name(card.family .. "@latest")
+    if spec == nil then
+        return nil
+    end
+    local summary = first_nonempty(card.description, "Ollama model")
+    return {
+        name = spec.displayName,
+        packageId = spec.displayName,
+        version = spec.tag,
+        latestVersion = spec.tag,
+        summary = summary,
+        description = summary,
+        homepage = model_homepage_url(spec),
+        sourceUrl = model_homepage_url(spec),
+        packageType = "model",
+        type = "package",
+        updatedAt = card.updated ~= "" and card.updated or nil,
+        extraFields = {
+            host = spec.host,
+            namespace = spec.namespace,
+            model = spec.model,
+            tag = spec.tag,
+            cliName = spec.cliName,
+            libraryUrl = card.libraryUrl,
+            familyName = card.name,
+            pulls = card.pulls,
+            tagCount = card.tagCount,
+            capabilities = card.capabilities,
+            labels = card.sizes,
+            cloud = card.cloud,
+        },
+    }
+end
+
+local function search_remote_models(context, prompt)
+    local html, search_error = web_get(context, OLLAMA_SEARCH_URL .. "?q=" .. url_encode(prompt))
+    if html == nil then
+        return nil, search_error
+    end
+
+    local cards = parse_search_cards(html)
+    local items = {}
+    local seen = {}
+    for _, card in ipairs(cards) do
+        local page_html, page_error = web_get(context, card.libraryUrl)
+        local tags = page_html ~= nil and parse_model_page_tags(page_html) or {}
+        if page_html == nil and page_error ~= nil then
+            log_message(context, "warn", page_error)
+        end
+
+        if #tags == 0 then
+            local fallback = build_search_fallback_item(card)
+            if fallback ~= nil and not seen[fallback.packageId] then
+                seen[fallback.packageId] = true
+                items[#items + 1] = fallback
+            end
+        else
+            for _, tag in ipairs(tags) do
+                local item = build_search_item_from_tag(card, tag)
+                if not seen[item.packageId] then
+                    seen[item.packageId] = true
+                    items[#items + 1] = item
+                end
+            end
+        end
+    end
+
+    table.sort(items, function(left, right)
+        return lower(left.packageId or left.name or "") < lower(right.packageId or right.name or "")
+    end)
+    return items, nil
 end
 
 local function unique_append(list, seen, value)
@@ -2663,10 +2882,20 @@ function plugin.outdated(context)
 end
 
 function plugin.search(context, prompt)
-    local query = lower(trim(prompt))
+    local query = trim(prompt)
     local items = {}
-    if query ~= "" and (query == "ollama" or query == APP_PACKAGE_NAME or starts_with(APP_PACKAGE_NAME, query) or starts_with(query, "app:ollama")) then
+    local normalized_query = lower(query)
+    if query ~= "" and (normalized_query == "ollama" or normalized_query == APP_PACKAGE_NAME or starts_with(APP_PACKAGE_NAME, normalized_query) or starts_with(normalized_query, "app:ollama")) then
         items[#items + 1] = static_app_search_item()
+    end
+    if query ~= "" then
+        local model_items, search_error = search_remote_models(context, query)
+        if search_error ~= nil then
+            log_message(context, "warn", search_error)
+        end
+        for _, item in ipairs(model_items or {}) do
+            items[#items + 1] = item
+        end
     end
     emit_event(context, "searched", items)
     return items

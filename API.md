@@ -26,7 +26,7 @@ Source of truth is ReqPack wiki page `Extending-Writing-Lua-Plugins` from this p
 - `info()` prefers AICache metadata, then falls back to local Ollama manifest plus `ollama show`
 - `remove()` deletes model aliases from Ollama via `ollama rm`, cleans AICache metadata/views, and prunes unreferenced adopted blobs
 - `installLocal()` is intentionally unsupported in v1
-- `search()` only returns static runtime package result for `app:ollama` in v1
+- `search()` queries the Ollama library, expands discovered model families into `model@tag` package results, and still returns static runtime package result for `app:ollama`
 - `outdated()` returns empty list in v1
 
 ## Required Methods

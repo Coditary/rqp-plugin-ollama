@@ -62,7 +62,7 @@ rqp info ollama app:ollama
 - app install/update uses official `https://ollama.com/install.sh` surface
 - app removal is best-effort and intentionally conservative about user model storage
 - `installLocal()` is unsupported in v1
-- `search()` returns only static app result for `app:ollama`/`ollama` in v1
+- `search()` queries the Ollama library website, expands matching model families into installable `model@tag` results, and still returns `app:ollama` for runtime lookup
 - `outdated()` returns an empty list in v1
 
 ## Testing

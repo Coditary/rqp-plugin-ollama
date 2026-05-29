@@ -32,7 +32,7 @@ return {
     success = true,
     events = { "informed" },
     resultCount = 1,
-    resultName = "qwen3:8b",
+    resultName = "qwen3@8b",
     resultVersion = "1111111111111111111111111111111111111111111111111111111111111111",
   }
 }

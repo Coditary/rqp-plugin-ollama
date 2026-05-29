@@ -16,6 +16,7 @@ Source of truth is ReqPack wiki page `Extending-Writing-Lua-Plugins` from this p
 
 - `app:ollama` uses official Ollama installer script for install/update
 - model packages use `ollama pull`, `ollama rm`, `ollama ls`, and `ollama show`
+- model package input accepts both `model:tag` and `model@tag`; plugin calls Ollama with `model:tag` but shows/returns names as `model@tag`
 - model install/update adopt local Ollama manifest and blob metadata into `~/.local/share/aicache`
 - adopted cache layout includes:
   - `blobs/sha256/<prefix>/<digest>`

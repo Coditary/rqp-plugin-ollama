@@ -14,15 +14,20 @@ Queries prefer AICache first, then fall back to local Ollama metadata and CLI ou
 
 - `app:ollama` for runtime itself
 - `model:tag` for default Ollama library models
+- `model@tag` as alias for `model:tag`
 - `namespace/model:tag` for namespaced models
+- `namespace/model@tag` as alias for `namespace/model:tag`
 - `host/namespace/model:tag` for fully qualified remote identities
+- `host/namespace/model@tag` as alias for `host/namespace/model:tag`
 - tag is optional and defaults to `latest`
+- plugin shows model names as `@tag` in output while still using Ollama's `:tag` syntax internally
 
 Examples:
 
 ```bash
 rqp install ollama app:ollama
 rqp install ollama qwen3:8b
+rqp install ollama qwen3@4b
 rqp install ollama llava
 rqp remove ollama qwen3:8b
 rqp info ollama app:ollama

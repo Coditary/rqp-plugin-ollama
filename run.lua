@@ -1009,13 +1009,16 @@ local function make_model_spec(host, namespace, model, tag)
     end
 
     if lower(spec.host) == DEFAULT_HOST and lower(spec.namespace) == DEFAULT_NAMESPACE then
-        spec.displayName = spec.model .. ":" .. spec.tag
+        spec.cliName = spec.model .. ":" .. spec.tag
+        spec.displayName = spec.model .. "@" .. spec.tag
     elseif lower(spec.host) == DEFAULT_HOST then
-        spec.displayName = spec.namespace .. "/" .. spec.model .. ":" .. spec.tag
+        spec.cliName = spec.namespace .. "/" .. spec.model .. ":" .. spec.tag
+        spec.displayName = spec.namespace .. "/" .. spec.model .. "@" .. spec.tag
     else
-        spec.displayName = spec.host .. "/" .. spec.namespace .. "/" .. spec.model .. ":" .. spec.tag
+        spec.cliName = spec.host .. "/" .. spec.namespace .. "/" .. spec.model .. ":" .. spec.tag
+        spec.displayName = spec.host .. "/" .. spec.namespace .. "/" .. spec.model .. "@" .. spec.tag
     end
-    spec.packageId = spec.displayName
+    spec.packageId = spec.cliName
     return spec, nil
 end
 
@@ -1030,7 +1033,9 @@ local function parse_model_name(raw)
 
     local path_part = text
     local tag = DEFAULT_TAG
-    if text:find(":", 1, true) ~= nil and text:find(":[^/]+$") ~= nil then
+    if text:find("@", 1, true) ~= nil and text:find("@[^/@]+$") ~= nil then
+        path_part, tag = text:match("^(.*)@([^/@]+)$")
+    elseif text:find(":", 1, true) ~= nil and text:find(":[^/]+$") ~= nil then
         path_part, tag = text:match("^(.*):([^/:]+)$")
     end
 
@@ -1641,7 +1646,7 @@ local function parse_show_output(spec, output)
 end
 
 local function info_from_show_cli(context, cli_binary, spec)
-    local result = run_command(context, build_command(cli_binary, { "show", spec.displayName }))
+    local result = run_command(context, build_command(cli_binary, { "show", spec.cliName }))
     if result == nil or not is_command_success(result) then
         return nil, first_nonempty(result and result.stderr, result and result.stdout, "ollama show failed")
     end
@@ -2401,7 +2406,7 @@ function plugin.install(context, packages)
             end
 
             begin_step(context, "pull ollama model " .. spec.displayName)
-            local result = run_command(context, build_command(cli_binary, { "pull", spec.displayName }))
+            local result = run_command(context, build_command(cli_binary, { "pull", spec.cliName }))
             if result == nil or not is_command_success(result) then
                 tx_failed(context, first_nonempty(result and result.stderr, result and result.stdout, "ollama pull failed"))
                 return false
@@ -2463,7 +2468,7 @@ function plugin.remove(context, packages)
             end
 
             begin_step(context, "remove ollama model " .. spec.displayName)
-            local result = run_command(context, build_command(cli_binary, { "rm", spec.displayName }))
+            local result = run_command(context, build_command(cli_binary, { "rm", spec.cliName }))
             if result == nil or not is_command_success(result) then
                 tx_failed(context, first_nonempty(result and result.stderr, result and result.stdout, "ollama rm failed"))
                 return false
@@ -2530,7 +2535,7 @@ function plugin.update(context, packages)
             end
 
             begin_step(context, "update ollama model " .. spec.displayName)
-            local result = run_command(context, build_command(cli_binary, { "pull", spec.displayName }))
+            local result = run_command(context, build_command(cli_binary, { "pull", spec.cliName }))
             if result == nil or not is_command_success(result) then
                 tx_failed(context, first_nonempty(result and result.stderr, result and result.stdout, "ollama pull failed"))
                 return false
@@ -2718,6 +2723,7 @@ function plugin.resolvePackage(context, package)
             namespace = spec.namespace,
             model = spec.model,
             tag = spec.tag,
+            cliName = spec.cliName,
         },
     }
 end

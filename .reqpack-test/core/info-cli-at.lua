@@ -1,9 +1,9 @@
 return {
-  name = "ollama info cli fallback",
+  name = "ollama info cli fallback @tag",
   request = {
     action = "info",
     system = "ollama",
-    prompt = "qwen3:8b",
+    prompt = "qwen3@4b",
   },
   fakeExec = {
     {
@@ -14,9 +14,17 @@ return {
       success = true,
     },
     {
-      match = "ollama show qwen3:8b",
+      match = "ollama show qwen3:4b",
       exitCode = 0,
-      stdout = "  Model\n    architecture        qwen3\n    parameters          8B\n    context length      131072\n    quantization        Q4_K_M\n\n  Capabilities\n    completion\n    tools\n\n  License\n    Apache-2.0\n",
+      stdout = [[Model
+  architecture        qwen3
+  parameters          4B
+  quantization        Q4_K_M
+  context length      131072
+
+Capabilities
+  completion
+]],
       stderr = "",
       success = true,
     },
@@ -25,7 +33,7 @@ return {
     success = true,
     events = { "informed" },
     resultCount = 1,
-    resultName = "qwen3@8b",
-    resultVersion = "8b",
+    resultName = "qwen3@4b",
+    resultVersion = "4b",
   }
 }
